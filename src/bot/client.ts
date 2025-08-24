@@ -111,14 +111,29 @@ export class DiscordBot {
     let isThread = false;
     
     if (message.channel) {
-      // Check if this is a thread
-      if (message.channel.type === ChannelType.PublicThread || 
-          message.channel.type === ChannelType.PrivateThread || 
-          message.channel.type === ChannelType.AnnouncementThread) {
+      // Check if this is a thread - use multiple detection methods for robustness
+      const isThreadByType = message.channel.type === ChannelType.PublicThread || 
+                            message.channel.type === ChannelType.PrivateThread || 
+                            message.channel.type === ChannelType.AnnouncementThread;
+      
+      // Additional check: threads have a parent property
+      const isThreadByParent = message.channel.parent !== undefined;
+      
+      // Thread detection: use type check as primary, parent check as fallback
+      if (isThreadByType || (isThreadByParent && "parent" in message.channel)) {
         isThread = true;
-        // For threads, use the parent channel name for folder mapping
-        channelName = message.channel.parent?.name || "default";
-        console.log(`Message in thread ${message.channel.name} (${channelId}) - using parent channel: ${channelName}`);
+        
+        // For threads, ALWAYS use the parent channel name for folder mapping
+        const parentChannelName = message.channel.parent?.name;
+        
+        if (parentChannelName) {
+          channelName = parentChannelName;
+          console.log(`Message in thread ${message.channel.name} (${channelId}) - using parent channel: ${channelName}`);
+        } else {
+          // If parent is missing, use "default" but log this unusual case
+          channelName = "default";
+          console.warn(`Thread detected but parent channel is missing for thread: ${message.channel.name} (${channelId}), using default folder`);
+        }
       } else if ("name" in message.channel) {
         // Regular channel
         channelName = message.channel.name;

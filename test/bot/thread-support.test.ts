@@ -270,5 +270,40 @@ describe("DiscordBot Thread Support", () => {
         })
       );
     });
+
+    it("should handle edge case where thread has parent property but type detection fails", async () => {
+      const mockMessage = {
+        author: { bot: false, id: allowedUserId },
+        channelId: "edge-case-thread-456",
+        content: "edge case thread message",
+        id: "msg-edge",
+        channel: {
+          type: 999, // Unknown/invalid type that doesn't match thread types
+          name: "edge-thread",
+          parent: {
+            name: "parent-project", // But has valid parent
+          },
+          send: vi.fn().mockResolvedValue({ id: "reply-edge" }),
+        },
+      };
+
+      mockClaudeManager.hasActiveProcess.mockReturnValue(false);
+      mockClaudeManager.getSessionId.mockReturnValue(undefined);
+
+      await (bot as any).handleMessage(mockMessage);
+
+      // Should still detect as thread due to parent property and use parent channel name
+      expect(mockClaudeManager.runClaudeCode).toHaveBeenCalledWith(
+        "edge-case-thread-456",
+        "parent-project", // Should use parent channel name
+        "edge case thread message",
+        undefined,
+        expect.objectContaining({
+          channelName: "parent-project",
+          isThread: true,
+          threadName: "edge-thread",
+        })
+      );
+    });
   });
 });
