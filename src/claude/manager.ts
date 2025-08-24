@@ -2,11 +2,10 @@ import { spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import { EmbedBuilder } from "discord.js";
-import type { SDKMessage, SessionState, SessionConfig } from "../types/index.js";
+import { SDKMessage, SessionState, SessionConfig } from "../types/index.js";
 import { buildClaudeCommand, type DiscordContext } from "../utils/shell.js";
 import { DatabaseManager } from "../db/database.js";
 import { SessionManager } from "./session-manager.js";
-import { SessionState as SessionStateEnum } from "../types/index.js";
 
 export class ClaudeManager {
   private db: DatabaseManager;
