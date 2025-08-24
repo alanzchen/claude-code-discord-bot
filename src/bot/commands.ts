@@ -127,6 +127,10 @@ export class CommandHandler {
           color = 0xFFD700; // Yellow
           stateEmoji = "🟡";
           break;
+        case SessionState.READY:
+          color = 0x00FF00; // Green
+          stateEmoji = "💬";
+          break;
         case SessionState.COMPLETED:
           color = 0x00FF00; // Green
           stateEmoji = "✅";

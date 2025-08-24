@@ -147,6 +147,14 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Check if session can accept new messages (is in ready state)
+   */
+  canAcceptMessages(channelId: string): boolean {
+    const state = this.getSessionState(channelId);
+    return state === SessionState.READY || state === SessionState.INACTIVE;
+  }
+
+  /**
    * Check if session has queued messages
    */
   hasQueuedMessages(channelId: string): boolean {
@@ -214,12 +222,21 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Complete a session (natural completion)
+   * Complete a session (natural completion) - mark as ready for more messages
    */
   completeSession(channelId: string): void {
     this.activeSessions.delete(channelId);
-    this.updateSessionState(channelId, SessionState.COMPLETED);
+    this.updateSessionState(channelId, SessionState.READY);
     this.emit('sessionCompleted', channelId);
+  }
+
+  /**
+   * Fully complete a session (no more messages expected)
+   */
+  finalizeSession(channelId: string): void {
+    this.activeSessions.delete(channelId);
+    this.updateSessionState(channelId, SessionState.COMPLETED);
+    this.emit('sessionFinalized', channelId);
   }
 
   /**

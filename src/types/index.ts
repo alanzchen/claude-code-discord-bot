@@ -51,7 +51,8 @@ export enum SessionState {
   STARTING = 'starting', 
   ACTIVE = 'active',
   PAUSED = 'paused',
-  COMPLETED = 'completed',
+  READY = 'ready', // Completed and ready for next message
+  COMPLETED = 'completed', // Fully completed (old sessions)
   ERROR = 'error',
   ABORTED = 'aborted'
 }

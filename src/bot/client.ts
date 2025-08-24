@@ -154,16 +154,19 @@ export class DiscordBot {
     }
     
     const sessionId = this.claudeManager.getSessionId(channelId);
+    const sessionState = this.claudeManager.getSessionState(channelId);
 
     console.log(`Message content: ${message.content}`);
     console.log(`Existing session ID: ${sessionId || "none"}`);
+    console.log(`Session state: ${sessionState}`);
     if (isThread) {
       console.log(`Thread session - folder: ${channelName}, session ID: ${channelId}`);
     }
 
     try {
-      // Check if we have an existing session
+      // Check if we should continue an existing session or start new
       const isNewSession = !sessionId;
+      const isContinuation = sessionState === 'ready';
       
       // Create status embed
       const statusEmbed = new EmbedBuilder()
@@ -173,7 +176,11 @@ export class DiscordBot {
         ? `📌 Thread: ${message.channel.name}\n📁 Project: ${channelName}`
         : `📁 Channel: ${channelName}`;
       
-      if (isNewSession) {
+      if (isContinuation) {
+        statusEmbed
+          .setTitle("💬 Continuing Session")
+          .setDescription(`${locationText}\n**Session ID:** ${sessionId}\nSending follow-up message...`);
+      } else if (isNewSession) {
         statusEmbed
           .setTitle("🆕 Starting New Session")
           .setDescription(`${locationText}\nInitializing Claude Code...`);
@@ -198,16 +205,22 @@ export class DiscordBot {
         threadName: isThread ? message.channel.name : undefined,
       };
 
-      // Reserve the channel and run Claude Code
-      this.claudeManager.reserveChannel(
-        channelId, 
-        sessionId, 
-        reply, 
-        {}, // Default config for now
-        isThread, 
-        isThread ? message.channel.name : undefined
-      );
-      await this.claudeManager.runClaudeCode(channelId, channelName, message.content, sessionId, discordContext);
+      // Handle different session scenarios
+      if (isContinuation) {
+        // Continue existing session - don't reserve, just continue
+        await this.claudeManager.continueSession(channelId, message.content, discordContext);
+      } else {
+        // New session or resuming - use existing flow  
+        this.claudeManager.reserveChannel(
+          channelId, 
+          sessionId, 
+          reply, 
+          {}, // Default config for now
+          isThread, 
+          isThread ? message.channel.name : undefined
+        );
+        await this.claudeManager.runClaudeCode(channelId, channelName, message.content, sessionId, discordContext);
+      }
     } catch (error) {
       console.error("Error running Claude Code:", error);
       

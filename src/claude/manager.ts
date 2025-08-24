@@ -125,6 +125,33 @@ export class ClaudeManager {
     return this.sessionManager.abortSession(channelId);
   }
 
+  /**
+   * Send a follow-up message to an existing session by starting a new Claude process with --resume
+   */
+  async continueSession(channelId: string, message: string, discordContext?: DiscordContext): Promise<void> {
+    const metadata = this.sessionManager.getSessionMetadata(channelId);
+    if (!metadata || metadata.sessionId === 'pending') {
+      throw new Error('No valid session to continue');
+    }
+
+    // Check if there's already an active process for this channel
+    if (this.sessionManager.hasActiveProcess(channelId)) {
+      throw new Error('Session already has an active process. Wait for it to complete or abort it first.');
+    }
+
+    console.log(`Continuing session ${metadata.sessionId} with new message`);
+
+    // Use the existing runClaudeCode method but with the resume flag
+    await this.runClaudeCode(
+      channelId, 
+      metadata.channelName, 
+      message, 
+      metadata.sessionId, // This will trigger --resume
+      discordContext,
+      metadata.config
+    );
+  }
+
   setDiscordMessage(channelId: string, message: any): void {
     this.channelMessages.set(channelId, message);
     this.channelToolCalls.set(channelId, new Map());
@@ -217,7 +244,7 @@ export class ClaudeManager {
     // Add message to queue
     this.sessionManager.queueMessage(channelId, prompt);
 
-    // Close stdin for now - we'll reopen it for follow-up messages
+    // Close stdin to signal we're not sending more input to this process
     claude.stdin.end();
 
     // Add immediate listeners to debug
@@ -302,8 +329,18 @@ export class ClaudeManager {
       clearTimeout(timeout);
 
       if (code === 0 || code === null) {
-        // Normal completion
+        // Normal completion - mark session as completed but keep metadata for resumption
         this.sessionManager.completeSession(channelId);
+        
+        const channel = this.channelMessages.get(channelId)?.channel;
+        if (channel) {
+          const completionEmbed = new EmbedBuilder()
+            .setTitle("✅ Task Complete")
+            .setDescription("Session ready for your next message")
+            .setColor(0x00FF00); // Green
+          
+          channel.send({ embeds: [completionEmbed] }).catch(console.error);
+        }
       } else {
         // Process failed
         this.sessionManager.errorSession(channelId, new Error(`Process exited with code: ${code}`));

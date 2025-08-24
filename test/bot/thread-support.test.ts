@@ -37,9 +37,11 @@ vi.mock("discord.js", () => ({
 const mockClaudeManager = {
   hasActiveProcess: vi.fn(),
   getSessionId: vi.fn(),
+  getSessionState: vi.fn(),
   setDiscordMessage: vi.fn(),
   reserveChannel: vi.fn(),
   runClaudeCode: vi.fn(),
+  continueSession: vi.fn(),
   clearSession: vi.fn(),
 };
 
@@ -91,6 +93,7 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue(undefined);
+      mockClaudeManager.getSessionState.mockReturnValue("inactive");
 
       // Access private method for testing
       await (bot as any).handleMessage(mockMessage);
@@ -138,6 +141,7 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue(undefined);
+      mockClaudeManager.getSessionState.mockReturnValue("inactive");
 
       await (bot as any).handleMessage(mockMessage);
 
@@ -184,14 +188,13 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue("existing-session");
+      mockClaudeManager.getSessionState.mockReturnValue("ready");
 
       await (bot as any).handleMessage(mockMessage);
 
-      expect(mockClaudeManager.runClaudeCode).toHaveBeenCalledWith(
+      expect(mockClaudeManager.continueSession).toHaveBeenCalledWith(
         "private-thread-789",
-        "secret-project",
         "private thread message",
-        "existing-session",
         expect.objectContaining({
           channelId: "private-thread-789",
           channelName: "secret-project",
@@ -220,6 +223,7 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue(undefined);
+      mockClaudeManager.getSessionState.mockReturnValue("inactive");
 
       await (bot as any).handleMessage(mockMessage);
 
@@ -278,6 +282,7 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue(undefined);
+      mockClaudeManager.getSessionState.mockReturnValue("inactive");
 
       await (bot as any).handleMessage(mockMessage);
 
@@ -313,6 +318,7 @@ describe("DiscordBot Thread Support", () => {
 
       mockClaudeManager.hasActiveProcess.mockReturnValue(false);
       mockClaudeManager.getSessionId.mockReturnValue(undefined);
+      mockClaudeManager.getSessionState.mockReturnValue("inactive");
 
       await (bot as any).handleMessage(mockMessage);
 
