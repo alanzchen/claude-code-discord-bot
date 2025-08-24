@@ -1,4 +1,5 @@
-import { SessionState, SessionConfig, SessionMetadata, ChannelProcess } from '../types/index.js';
+import { SessionState } from '../types/index.js';
+import type { SessionConfig, SessionMetadata, ChannelProcess } from '../types/index.js';
 import { DatabaseManager } from '../db/database.js';
 import { EventEmitter } from 'events';
 
@@ -117,6 +118,13 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Remove active process for a session (cleanup when process ends)
+   */
+  removeActiveProcess(channelId: string): void {
+    this.activeSessions.delete(channelId);
+  }
+
+  /**
    * Check if session has an active process
    */
   hasActiveProcess(channelId: string): boolean {
@@ -208,9 +216,10 @@ export class SessionManager extends EventEmitter {
     const process = this.activeSessions.get(channelId);
     if (process && process.process) {
       try {
+        // Set state to ABORTED before killing so close handler knows it was explicit
+        this.updateSessionState(channelId, SessionState.ABORTED);
         process.process.kill('SIGTERM');
         this.activeSessions.delete(channelId);
-        this.updateSessionState(channelId, SessionState.ABORTED);
         this.emit('sessionAborted', channelId);
         return true;
       } catch (error) {
@@ -256,6 +265,8 @@ export class SessionManager extends EventEmitter {
     const process = this.activeSessions.get(channelId);
     if (process && process.process) {
       try {
+        // Set state to ABORTED before killing so close handler knows it was explicit
+        this.updateSessionState(channelId, SessionState.ABORTED);
         process.process.kill('SIGTERM');
       } catch (error) {
         console.error(`Error killing process for ${channelId}:`, error);

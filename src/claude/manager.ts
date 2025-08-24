@@ -2,7 +2,8 @@ import { spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import { EmbedBuilder } from "discord.js";
-import { SDKMessage, SessionState, SessionConfig } from "../types/index.js";
+import { SessionState } from "../types/index.js";
+import type { SDKMessage, SessionConfig } from "../types/index.js";
 import { buildClaudeCommand, type DiscordContext } from "../utils/shell.js";
 import { DatabaseManager } from "../db/database.js";
 import { SessionManager } from "./session-manager.js";
@@ -129,7 +130,7 @@ export class ClaudeManager {
   }
 
   /**
-   * Send a follow-up message to an existing session by starting a new Claude process with --resume
+   * Send a follow-up message to an existing session
    */
   async continueSession(channelId: string, message: string, discordContext?: DiscordContext): Promise<void> {
     const metadata = this.sessionManager.getSessionMetadata(channelId);
@@ -137,12 +138,23 @@ export class ClaudeManager {
       throw new Error('No valid session to continue');
     }
 
+    // Check if there's an active process that can accept messages
+    const activeProcess = this.sessionManager.getActiveProcess(channelId);
+    if (activeProcess && activeProcess.inputStream) {
+      // Process is still alive, send message to it
+      console.log(`Continuing session ${metadata.sessionId} with existing process`);
+      this.sessionManager.queueMessage(channelId, message);
+      this.sessionManager.updateSessionState(channelId, SessionState.ACTIVE);
+      this.sendMessageToProcess(channelId, message);
+      return;
+    }
+
     // Check if there's already an active process for this channel
     if (this.sessionManager.hasActiveProcess(channelId)) {
       throw new Error('Session already has an active process. Wait for it to complete or abort it first.');
     }
 
-    console.log(`Continuing session ${metadata.sessionId} with new message`);
+    console.log(`Continuing session ${metadata.sessionId} with new process (old process ended)`);
 
     // Use the existing runClaudeCode method but with the resume flag
     await this.runClaudeCode(
@@ -153,6 +165,26 @@ export class ClaudeManager {
       discordContext,
       metadata.config
     );
+  }
+
+  /**
+   * Send a message to an existing Claude process
+   */
+  private sendMessageToProcess(channelId: string, message: string): void {
+    const activeProcess = this.sessionManager.getActiveProcess(channelId);
+    if (!activeProcess?.inputStream) {
+      console.error(`No active process or input stream for channel ${channelId}`);
+      return;
+    }
+
+    try {
+      // Send the message followed by a newline
+      activeProcess.inputStream.write(message + '\n');
+      console.log(`Sent message to process for channel ${channelId}: ${message}`);
+    } catch (error) {
+      console.error(`Error sending message to process for channel ${channelId}:`, error);
+      this.sessionManager.errorSession(channelId, error as Error);
+    }
   }
 
   setDiscordMessage(channelId: string, message: any): void {
@@ -178,7 +210,7 @@ export class ClaudeManager {
     const channelName = this.channelNames.get(channelId) || 'default';
     if (sessionId) {
       // Update existing session
-      this.sessionManager.updateSessionState(channelId, SessionStateEnum.STARTING);
+      this.sessionManager.updateSessionState(channelId, SessionState.STARTING);
     } else {
       // Create new session - sessionId will be set when Claude responds
       this.sessionManager.createSession(
@@ -247,8 +279,8 @@ export class ClaudeManager {
     // Add message to queue
     this.sessionManager.queueMessage(channelId, prompt);
 
-    // Close stdin to signal we're not sending more input to this process
-    claude.stdin.end();
+    // Send the initial message to the process
+    this.sendMessageToProcess(channelId, prompt);
 
     // Add immediate listeners to debug
     claude.on("spawn", () => {
@@ -309,8 +341,9 @@ export class ClaudeManager {
             } else if (parsed.type === "result") {
               this.handleResultMessage(channelId, parsed).then(() => {
                 clearTimeout(timeout);
-                claude.kill("SIGTERM");
-                // Session completion is handled in the close event handler
+                // Keep the process alive but mark session as ready for new input
+                this.sessionManager.updateSessionState(channelId, SessionState.READY);
+                console.log(`Session ${channelId} completed task, process kept alive for next message`);
               }).catch(console.error);
             } else if (parsed.type === "system") {
               console.log("System message:", parsed.subtype);
@@ -331,18 +364,29 @@ export class ClaudeManager {
       console.log(`Claude process exited with code ${code}`);
       clearTimeout(timeout);
 
+      // Clean up the active process reference
+      this.sessionManager.removeActiveProcess(channelId);
+
+      const currentState = this.sessionManager.getSessionState(channelId);
+      
       if (code === 0 || code === null) {
-        // Normal completion - mark session as completed but keep metadata for resumption
-        this.sessionManager.completeSession(channelId);
-        
-        const channel = this.channelMessages.get(channelId)?.channel;
-        if (channel) {
-          const completionEmbed = new EmbedBuilder()
-            .setTitle("✅ Task Complete")
-            .setDescription("Session ready for your next message")
-            .setColor(0x00FF00); // Green
+        // Normal completion
+        if (currentState === SessionState.ABORTED) {
+          // Process was explicitly terminated, don't send completion message
+          console.log(`Process for ${channelId} was explicitly terminated`);
+        } else {
+          // Process ended naturally (shouldn't happen with persistent processes)
+          this.sessionManager.updateSessionState(channelId, SessionState.COMPLETED);
           
-          channel.send({ embeds: [completionEmbed] }).catch(console.error);
+          const channel = this.channelMessages.get(channelId)?.channel;
+          if (channel) {
+            const completionEmbed = new EmbedBuilder()
+              .setTitle("🔄 Process Ended")
+              .setDescription("Use `/clear` to start a fresh session or send a message to resume")
+              .setColor(0xFFD700); // Yellow
+            
+            channel.send({ embeds: [completionEmbed] }).catch(console.error);
+          }
         }
       } else {
         // Process failed
@@ -561,12 +605,11 @@ export class ClaudeManager {
       description += `\n\n*Completed in ${parsed.num_turns} turns*`;
       
       resultEmbed
-        .setTitle("✅ Session Complete")
-        .setDescription(description)
+        .setTitle("✅ Task Complete")
+        .setDescription(description + "\n\n💬 *Send a message to continue this session*")
         .setColor(0x00FF00); // Green for success
         
-      // Mark session as completed
-      this.sessionManager.completeSession(channelId);
+      // State is already set to READY in the result handler above
     } else {
       resultEmbed
         .setTitle("❌ Session Failed")

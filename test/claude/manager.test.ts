@@ -152,7 +152,6 @@ describe('ClaudeManager', () => {
       
       expect(mockExistingProcess.kill).toHaveBeenCalledWith('SIGTERM');
     });
-    });
   });
 
   describe('getSessionId', () => {
@@ -184,7 +183,7 @@ describe('ClaudeManager', () => {
       
       const mockProcess = {
         pid: 12345,
-        stdin: { end: vi.fn() },
+        stdin: { end: vi.fn(), write: vi.fn() },
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn(),
@@ -205,7 +204,7 @@ describe('ClaudeManager', () => {
       }
       
       expect(spawn).toHaveBeenCalledWith('/bin/bash', ['-c', expect.stringContaining('claude')], expect.any(Object));
-      expect(mockProcess.stdin.end).toHaveBeenCalled();
+      // Note: stdin.end is no longer called immediately as we keep processes alive
     });
   });
 

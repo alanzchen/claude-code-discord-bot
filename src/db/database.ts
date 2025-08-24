@@ -150,7 +150,7 @@ export class DatabaseManager {
       JSON.stringify(config),
       Date.now(),
       isThread ? 1 : 0,
-      threadName
+      threadName || null
     );
   }
 
