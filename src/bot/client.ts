@@ -2,6 +2,7 @@ import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
+  ChannelType,
 } from "discord.js";
 import type { ClaudeManager } from '../claude/manager.js';
 import { CommandHandler } from './commands.js';
@@ -105,21 +106,38 @@ export class DiscordBot {
       return;
     }
 
-    const channelName =
-      message.channel && "name" in message.channel
-        ? message.channel.name
-        : "default";
+    // Determine channel name for folder mapping
+    let channelName = "default";
+    let isThread = false;
     
-    // Don't run in general channel
+    if (message.channel) {
+      // Check if this is a thread
+      if (message.channel.type === ChannelType.PublicThread || 
+          message.channel.type === ChannelType.PrivateThread || 
+          message.channel.type === ChannelType.AnnouncementThread) {
+        isThread = true;
+        // For threads, use the parent channel name for folder mapping
+        channelName = message.channel.parent?.name || "default";
+        console.log(`Message in thread ${message.channel.name} (${channelId}) - using parent channel: ${channelName}`);
+      } else if ("name" in message.channel) {
+        // Regular channel
+        channelName = message.channel.name;
+        console.log(`Message in channel: ${channelName} (${channelId})`);
+      }
+    }
+    
+    // Don't run in general channel or threads in general channel
     if (channelName === "general") {
       return;
     }
     
     const sessionId = this.claudeManager.getSessionId(channelId);
 
-    console.log(`Received message in channel: ${channelName} (${channelId})`);
     console.log(`Message content: ${message.content}`);
     console.log(`Existing session ID: ${sessionId || "none"}`);
+    if (isThread) {
+      console.log(`Thread session - folder: ${channelName}, session ID: ${channelId}`);
+    }
 
     try {
       // Check if we have an existing session
@@ -129,14 +147,18 @@ export class DiscordBot {
       const statusEmbed = new EmbedBuilder()
         .setColor(0xFFD700); // Yellow for startup
       
+      const locationText = isThread 
+        ? `📌 Thread: ${message.channel.name}\n📁 Project: ${channelName}`
+        : `📁 Channel: ${channelName}`;
+      
       if (isNewSession) {
         statusEmbed
           .setTitle("🆕 Starting New Session")
-          .setDescription("Initializing Claude Code...");
+          .setDescription(`${locationText}\nInitializing Claude Code...`);
       } else {
         statusEmbed
           .setTitle("🔄 Continuing Session")
-          .setDescription(`**Session ID:** ${sessionId}\nResuming Claude Code...`);
+          .setDescription(`${locationText}\n**Session ID:** ${sessionId}\nResuming Claude Code...`);
       }
       
       // Create initial Discord message
@@ -150,6 +172,8 @@ export class DiscordBot {
         channelName: channelName,
         userId: message.author.id,
         messageId: message.id,
+        isThread: isThread,
+        threadName: isThread ? message.channel.name : undefined,
       };
 
       // Reserve the channel and run Claude Code

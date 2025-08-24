@@ -3,6 +3,8 @@ export interface DiscordContext {
   channelName: string;
   userId: string;
   messageId?: string; // The original Discord message that triggered Claude Code
+  isThread?: boolean;
+  threadName?: string;
 }
 
 export interface PendingApproval {
