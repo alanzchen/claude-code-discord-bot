@@ -25,7 +25,8 @@ A Discord bot that runs Claude Code sessions on different projects based on Disc
 ## Features
 
 - **Channel-based project mapping**: Each Discord channel corresponds to a folder (e.g., `#my-project` → `/path/to/repos/my-project`)
-- **Persistent sessions**: Sessions are maintained per channel and automatically resume
+- **Thread support**: Discord threads within channels have separate Claude Code sessions while operating in the same project folder
+- **Persistent sessions**: Sessions are maintained per channel/thread and automatically resume
 - **Real-time streaming**: See Claude Code's tool usage and responses as they happen
 - **Activity logging**: Shows up to 20 lines of activity including tool calls with parameters
 - **Slash commands**: Use `/clear` to reset a session
@@ -161,9 +162,25 @@ Bot: 🔧 LS (path: .)
 ## How It Works
 
 - Each Discord channel maps to a folder: `#my-project` → `/path/to/repos/my-project`
-- Sessions persist per channel and automatically resume
+- Discord threads within channels create separate Claude Code sessions while operating in the same project folder
+- Sessions persist per channel/thread and automatically resume
 - Shows real-time tool usage and responses
 - Only responds to the configured `ALLOWED_USER_ID`
+
+### Thread Support
+
+You can create Discord threads within any channel to have separate Claude Code conversations:
+
+- **Public threads**: Anyone in the server can see and participate
+- **Private threads**: Only invited members can see the thread  
+- **Announcement threads**: Created from announcement channels
+
+Each thread gets its own Claude Code session while working in the parent channel's project folder. This allows multiple concurrent conversations about the same project.
+
+**Example:**
+- Channel: `#my-web-app` → Works in `/path/to/repos/my-web-app/`
+- Thread: "Fix login bug" → Separate session, same folder
+- Thread: "Add dark mode" → Another separate session, same folder
 
 For detailed setup instructions, troubleshooting, and development information, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
