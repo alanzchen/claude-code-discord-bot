@@ -2,6 +2,8 @@ import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
+  ChannelType,
+  MessageType,
 } from "discord.js";
 import type { ClaudeManager } from '../claude/manager.js';
 import { CommandHandler } from './commands.js';
@@ -91,6 +93,12 @@ export class DiscordBot {
 
     console.log("MESSAGE CREATED", message.id);
 
+    // Ignore system messages, including thread creation messages
+    if (message.type !== MessageType.Default) {
+      console.log(`Ignoring system message of type ${message.type} in channel ${message.channelId}`);
+      return;
+    }
+
     if (message.author.id !== this.allowedUserId) {
       return;
     }
@@ -105,21 +113,53 @@ export class DiscordBot {
       return;
     }
 
-    const channelName =
-      message.channel && "name" in message.channel
-        ? message.channel.name
-        : "default";
+    // Determine channel name for folder mapping
+    let channelName = "default";
+    let isThread = false;
     
-    // Don't run in general channel
+    if (message.channel) {
+      // Check if this is a thread - use multiple detection methods for robustness
+      const isThreadByType = message.channel.type === ChannelType.PublicThread || 
+                            message.channel.type === ChannelType.PrivateThread || 
+                            message.channel.type === ChannelType.AnnouncementThread;
+      
+      // Additional check: threads have a parent property
+      const isThreadByParent = message.channel.parent !== undefined;
+      
+      // Thread detection: use type check as primary, parent check as fallback
+      if (isThreadByType || (isThreadByParent && "parent" in message.channel)) {
+        isThread = true;
+        
+        // For threads, ALWAYS use the parent channel name for folder mapping
+        const parentChannelName = message.channel.parent?.name;
+        
+        if (parentChannelName) {
+          channelName = parentChannelName;
+          console.log(`Message in thread ${message.channel.name} (${channelId}) - using parent channel: ${channelName}`);
+        } else {
+          // If parent is missing, use "default" but log this unusual case
+          channelName = "default";
+          console.warn(`Thread detected but parent channel is missing for thread: ${message.channel.name} (${channelId}), using default folder`);
+        }
+      } else if ("name" in message.channel) {
+        // Regular channel
+        channelName = message.channel.name;
+        console.log(`Message in channel: ${channelName} (${channelId})`);
+      }
+    }
+    
+    // Don't run in general channel or threads in general channel
     if (channelName === "general") {
       return;
     }
     
     const sessionId = this.claudeManager.getSessionId(channelId);
 
-    console.log(`Received message in channel: ${channelName} (${channelId})`);
     console.log(`Message content: ${message.content}`);
     console.log(`Existing session ID: ${sessionId || "none"}`);
+    if (isThread) {
+      console.log(`Thread session - folder: ${channelName}, session ID: ${channelId}`);
+    }
 
     try {
       // Check if we have an existing session
@@ -129,14 +169,18 @@ export class DiscordBot {
       const statusEmbed = new EmbedBuilder()
         .setColor(0xFFD700); // Yellow for startup
       
+      const locationText = isThread 
+        ? `📌 Thread: ${message.channel.name}\n📁 Project: ${channelName}`
+        : `📁 Channel: ${channelName}`;
+      
       if (isNewSession) {
         statusEmbed
           .setTitle("🆕 Starting New Session")
-          .setDescription("Initializing Claude Code...");
+          .setDescription(`${locationText}\nInitializing Claude Code...`);
       } else {
         statusEmbed
           .setTitle("🔄 Continuing Session")
-          .setDescription(`**Session ID:** ${sessionId}\nResuming Claude Code...`);
+          .setDescription(`${locationText}\n**Session ID:** ${sessionId}\nResuming Claude Code...`);
       }
       
       // Create initial Discord message
@@ -150,6 +194,8 @@ export class DiscordBot {
         channelName: channelName,
         userId: message.author.id,
         messageId: message.id,
+        isThread: isThread,
+        threadName: isThread ? message.channel.name : undefined,
       };
 
       // Reserve the channel and run Claude Code

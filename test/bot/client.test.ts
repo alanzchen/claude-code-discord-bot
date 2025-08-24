@@ -14,6 +14,22 @@ vi.mock('discord.js', () => ({
     GuildMessages: 2,
     MessageContent: 4,
   },
+  EmbedBuilder: vi.fn().mockImplementation(() => ({
+    setTitle: vi.fn().mockReturnThis(),
+    setDescription: vi.fn().mockReturnThis(),
+    setColor: vi.fn().mockReturnThis(),
+  })),
+  ChannelType: {
+    GuildText: 0,
+    PublicThread: 11,
+    PrivateThread: 12,
+    AnnouncementThread: 10,
+  },
+  MessageType: {
+    Default: 0,
+    ThreadCreated: 18,
+    ThreadStarterMessage: 21,
+  },
 }));
 
 // Mock ClaudeManager
