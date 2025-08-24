@@ -64,6 +64,10 @@ export class ClaudeManager {
         statusEmbed.setTitle("⏸️ Session Paused");
         color = 0xFF8C00; // Orange
         break;
+      case SessionState.READY:
+        statusEmbed.setTitle("✅ Task Complete");
+        color = 0x00FF00; // Green
+        break;
       case SessionState.COMPLETED:
         statusEmbed.setTitle("✅ Session Complete");
         color = 0x00FF00; // Green
