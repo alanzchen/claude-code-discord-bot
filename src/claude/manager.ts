@@ -310,7 +310,7 @@ export class ClaudeManager {
               this.handleResultMessage(channelId, parsed).then(() => {
                 clearTimeout(timeout);
                 claude.kill("SIGTERM");
-                this.channelProcesses.delete(channelId);
+                // Session completion is handled in the close event handler
               }).catch(console.error);
             } else if (parsed.type === "system") {
               console.log("System message:", parsed.subtype);
@@ -386,8 +386,8 @@ export class ClaudeManager {
       console.error("Claude process error:", error);
       clearTimeout(timeout);
 
-      // Clean up process tracking on error
-      this.channelProcesses.delete(channelId);
+      // Handle session error through session manager
+      this.sessionManager.errorSession(channelId, error);
 
       // Send error to Discord
       const channel = this.channelMessages.get(channelId)?.channel;
