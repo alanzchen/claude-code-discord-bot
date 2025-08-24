@@ -27,7 +27,12 @@ describe('ClaudeManager', () => {
     const { DatabaseManager } = await import('../../src/db/database.js');
     mockDb = {
       getSession: vi.fn(),
+      getSessionMetadata: vi.fn(),
       setSession: vi.fn(),
+      setSessionWithMetadata: vi.fn(),
+      updateSessionState: vi.fn(),
+      incrementMessageCount: vi.fn(),
+      updateSessionConfig: vi.fn(),
       clearSession: vi.fn(),
       getAllSessions: vi.fn(),
       cleanupOldSessions: vi.fn(),
@@ -49,7 +54,18 @@ describe('ClaudeManager', () => {
     });
 
     it('should return true when active process exists', () => {
-      manager.reserveChannel('channel-1', undefined, {});
+      // Setup session first
+      manager.reserveChannel('channel-1', undefined, {}, {}, false, undefined);
+      
+      // Simulate setting an active process via session manager
+      const sessionManager = (manager as any).sessionManager;
+      const mockProcess = { kill: vi.fn() };
+      sessionManager.setActiveProcess('channel-1', { 
+        process: mockProcess, 
+        sessionId: 'test-session', 
+        discordMessage: {} 
+      });
+      
       expect(manager.hasActiveProcess('channel-1')).toBe(true);
     });
   });
@@ -57,20 +73,21 @@ describe('ClaudeManager', () => {
   describe('killActiveProcess', () => {
     it('should kill process when it exists', () => {
       const mockProcess = { kill: vi.fn() };
-      manager.reserveChannel('channel-1', undefined, {});
       
-      // Simulate setting the process
-      const channelProcesses = (manager as any).channelProcesses;
-      channelProcesses.get('channel-1').process = mockProcess;
-
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      // Setup session first  
+      manager.reserveChannel('channel-1', undefined, {}, {}, false, undefined);
+      
+      // Simulate setting an active process via session manager
+      const sessionManager = (manager as any).sessionManager;
+      sessionManager.setActiveProcess('channel-1', { 
+        process: mockProcess, 
+        sessionId: 'test-session', 
+        discordMessage: {} 
+      });
       
       manager.killActiveProcess('channel-1');
       
       expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(consoleSpy).toHaveBeenCalledWith('Killing active process for channel channel-1');
-      
-      consoleSpy.mockRestore();
     });
 
     it('should not throw when no process exists', () => {
@@ -80,7 +97,7 @@ describe('ClaudeManager', () => {
 
   describe('clearSession', () => {
     it('should clear all session data', () => {
-      manager.reserveChannel('channel-1', 'session-1', {});
+      manager.reserveChannel('channel-1', 'session-1', {}, {}, false, undefined);
       manager.setDiscordMessage('channel-1', { edit: vi.fn() });
       
       manager.clearSession('channel-1');
@@ -91,44 +108,49 @@ describe('ClaudeManager', () => {
   });
 
   describe('setDiscordMessage', () => {
-    it('should set discord message and initialize responses', () => {
+    it('should set discord message and initialize tool calls', () => {
       const mockMessage = { edit: vi.fn() };
       manager.setDiscordMessage('channel-1', mockMessage);
       
       const channelMessages = (manager as any).channelMessages;
-      const channelResponses = (manager as any).channelResponses;
+      const channelToolCalls = (manager as any).channelToolCalls;
       
       expect(channelMessages.get('channel-1')).toBe(mockMessage);
-      expect(channelResponses.get('channel-1')).toEqual({ embeds: [], textContent: "" });
+      expect(channelToolCalls.get('channel-1')).toBeInstanceOf(Map);
     });
   });
 
   describe('reserveChannel', () => {
     it('should reserve channel without existing process', () => {
       const mockMessage = { edit: vi.fn() };
-      manager.reserveChannel('channel-1', 'session-1', mockMessage);
+      manager.reserveChannel('channel-1', 'session-1', mockMessage, {}, false, undefined);
       
-      expect(manager.hasActiveProcess('channel-1')).toBe(true);
-      // Note: reserveChannel sets the sessionId in the process object, not channelSessions
-      // The sessionId is only set in channelSessions when Claude actually responds
+      // reserveChannel creates session metadata but not an active process
+      expect(manager.hasActiveProcess('channel-1')).toBe(false);
+      
+      // Check that session metadata was created
+      const sessionManager = (manager as any).sessionManager;
+      const metadata = sessionManager.getSessionMetadata('channel-1');
+      expect(metadata).toBeDefined();
     });
 
     it('should kill existing process when reserving channel', () => {
       const mockExistingProcess = { kill: vi.fn() };
       const mockMessage = { edit: vi.fn() };
       
-      manager.reserveChannel('channel-1', undefined, mockMessage);
-      const channelProcesses = (manager as any).channelProcesses;
-      channelProcesses.get('channel-1').process = mockExistingProcess;
+      // Setup first session with active process
+      manager.reserveChannel('channel-1', undefined, mockMessage, {}, false, undefined);
+      const sessionManager = (manager as any).sessionManager;
+      sessionManager.setActiveProcess('channel-1', { 
+        process: mockExistingProcess, 
+        sessionId: 'old-session', 
+        discordMessage: mockMessage 
+      });
       
-      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      
-      manager.reserveChannel('channel-1', 'new-session', mockMessage);
+      // Reserve channel again should abort the existing process
+      manager.reserveChannel('channel-1', 'new-session', mockMessage, {}, false, undefined);
       
       expect(mockExistingProcess.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(consoleSpy).toHaveBeenCalledWith('Killing existing process for channel channel-1 before starting new one');
-      
-      consoleSpy.mockRestore();
     });
   });
 
@@ -161,7 +183,7 @@ describe('ClaudeManager', () => {
       
       const mockProcess = {
         pid: 12345,
-        stdin: { end: vi.fn() },
+        stdin: { end: vi.fn(), write: vi.fn() },
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn(),
@@ -172,7 +194,7 @@ describe('ClaudeManager', () => {
       const { spawn } = await import('child_process');
       vi.mocked(spawn).mockReturnValue(mockProcess as any);
       
-      manager.reserveChannel('channel-1', undefined, {});
+      manager.reserveChannel('channel-1', undefined, {}, {}, false, undefined);
       
       // Start the process and immediately resolve to avoid hanging
       try {
@@ -182,7 +204,7 @@ describe('ClaudeManager', () => {
       }
       
       expect(spawn).toHaveBeenCalledWith('/bin/bash', ['-c', expect.stringContaining('claude')], expect.any(Object));
-      expect(mockProcess.stdin.end).toHaveBeenCalled();
+      // Note: stdin.end is no longer called immediately as we keep processes alive
     });
   });
 

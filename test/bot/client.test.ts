@@ -39,7 +39,9 @@ const mockClaudeManager = {
   setDiscordMessage: vi.fn(),
   reserveChannel: vi.fn(),
   runClaudeCode: vi.fn(),
+  continueSession: vi.fn(),
   getSessionId: vi.fn(),
+  getSessionState: vi.fn(),
 };
 
 describe('DiscordBot', () => {

@@ -18,8 +18,12 @@ describe('CommandHandler', () => {
   describe('getCommands', () => {
     it('should return array of slash commands', () => {
       const commands = commandHandler.getCommands();
-      expect(commands).toHaveLength(1);
-      expect(commands[0].name).toBe('clear');
+      expect(commands).toHaveLength(5);
+      expect(commands.find(cmd => cmd.name === 'clear')).toBeDefined();
+      expect(commands.find(cmd => cmd.name === 'status')).toBeDefined();
+      expect(commands.find(cmd => cmd.name === 'pause')).toBeDefined();
+      expect(commands.find(cmd => cmd.name === 'resume')).toBeDefined();
+      expect(commands.find(cmd => cmd.name === 'abort')).toBeDefined();
     });
   });
 
@@ -80,7 +84,10 @@ describe('CommandHandler', () => {
       await commandHandler.handleInteraction(mockInteraction);
 
       expect(mockClaudeManager.clearSession).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: "Unknown command.",
+        ephemeral: true,
+      });
     });
   });
 });
