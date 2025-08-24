@@ -3,6 +3,7 @@ import {
   GatewayIntentBits,
   EmbedBuilder,
   ChannelType,
+  MessageType,
 } from "discord.js";
 import type { ClaudeManager } from '../claude/manager.js';
 import { CommandHandler } from './commands.js';
@@ -91,6 +92,12 @@ export class DiscordBot {
     if (message.author.bot) return;
 
     console.log("MESSAGE CREATED", message.id);
+
+    // Ignore system messages, including thread creation messages
+    if (message.type !== MessageType.Default) {
+      console.log(`Ignoring system message of type ${message.type} in channel ${message.channelId}`);
+      return;
+    }
 
     if (message.author.id !== this.allowedUserId) {
       return;

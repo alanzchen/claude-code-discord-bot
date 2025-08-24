@@ -26,6 +26,11 @@ vi.mock("discord.js", () => ({
     PrivateThread: 12,
     AnnouncementThread: 10,
   },
+  MessageType: {
+    Default: 0,
+    ThreadCreated: 18,
+    ThreadStarterMessage: 21,
+  },
 }));
 
 // Mock ClaudeManager
@@ -50,12 +55,18 @@ describe("DiscordBot Thread Support", () => {
   let bot: DiscordBot;
   const allowedUserId = "test-user-123";
   
-  // Get ChannelType from our mock
+  // Get ChannelType and MessageType from our mock
   const ChannelType = {
     GuildText: 0,
     PublicThread: 11,
     PrivateThread: 12,
     AnnouncementThread: 10,
+  };
+
+  const MessageType = {
+    Default: 0,
+    ThreadCreated: 18,
+    ThreadStarterMessage: 21,
   };
 
   beforeEach(() => {
@@ -70,6 +81,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "channel-123",
         content: "test message",
         id: "msg-123",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.GuildText,
           name: "test-project",
@@ -110,6 +122,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "thread-456", // This is the thread ID
         content: "test thread message",
         id: "msg-456",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.PublicThread,
           name: "my-discussion",
@@ -152,6 +165,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "private-thread-789",
         content: "private thread message",
         id: "msg-789",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.PrivateThread,
           name: "private-discussion",
@@ -187,6 +201,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "announcement-thread-101",
         content: "announcement thread message",
         id: "msg-101",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.AnnouncementThread,
           name: "important-updates",
@@ -222,6 +237,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "general-thread-123",
         content: "should be ignored",
         id: "msg-general",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.PublicThread,
           name: "some-thread",
@@ -245,6 +261,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "orphan-thread-123",
         content: "orphan thread message",
         id: "msg-orphan",
+        type: MessageType.Default,
         channel: {
           type: ChannelType.PublicThread,
           name: "orphan-thread",
@@ -277,6 +294,7 @@ describe("DiscordBot Thread Support", () => {
         channelId: "edge-case-thread-456",
         content: "edge case thread message",
         id: "msg-edge",
+        type: MessageType.Default,
         channel: {
           type: 999, // Unknown/invalid type that doesn't match thread types
           name: "edge-thread",
@@ -304,6 +322,56 @@ describe("DiscordBot Thread Support", () => {
           threadName: "edge-thread",
         })
       );
+    });
+
+    it("should ignore thread creation system messages", async () => {
+      const mockMessage = {
+        author: { bot: false, id: allowedUserId },
+        channelId: "thread-456",
+        content: "", // Thread creation messages often have empty content
+        id: "msg-thread-create",
+        type: MessageType.ThreadCreated, // System message type
+        channel: {
+          type: ChannelType.PublicThread,
+          name: "new-thread",
+          parent: {
+            name: "test-project",
+          },
+        },
+      };
+
+      mockClaudeManager.hasActiveProcess.mockReturnValue(false);
+
+      await (bot as any).handleMessage(mockMessage);
+
+      // Should not process thread creation messages
+      expect(mockClaudeManager.reserveChannel).not.toHaveBeenCalled();
+      expect(mockClaudeManager.runClaudeCode).not.toHaveBeenCalled();
+    });
+
+    it("should ignore thread starter system messages", async () => {
+      const mockMessage = {
+        author: { bot: false, id: allowedUserId },
+        channelId: "thread-789",
+        content: "Started a thread: Feature Discussion",
+        id: "msg-thread-starter",
+        type: MessageType.ThreadStarterMessage, // System message type
+        channel: {
+          type: ChannelType.PublicThread,
+          name: "feature-discussion",
+          parent: {
+            name: "main-project",
+          },
+        },
+      };
+
+      mockClaudeManager.hasActiveProcess.mockReturnValue(false);
+
+      await (bot as any).handleMessage(mockMessage);
+
+      // Should not process thread starter messages
+      expect(mockClaudeManager.reserveChannel).not.toHaveBeenCalled();
+      expect(mockClaudeManager.runClaudeCode).not.toHaveBeenCalled();
     });
   });
 });
