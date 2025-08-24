@@ -199,7 +199,14 @@ export class DiscordBot {
       };
 
       // Reserve the channel and run Claude Code
-      this.claudeManager.reserveChannel(channelId, sessionId, reply);
+      this.claudeManager.reserveChannel(
+        channelId, 
+        sessionId, 
+        reply, 
+        {}, // Default config for now
+        isThread, 
+        isThread ? message.channel.name : undefined
+      );
       await this.claudeManager.runClaudeCode(channelId, channelName, message.content, sessionId, discordContext);
     } catch (error) {
       console.error("Error running Claude Code:", error);

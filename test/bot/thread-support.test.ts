@@ -98,7 +98,10 @@ describe("DiscordBot Thread Support", () => {
       expect(mockClaudeManager.reserveChannel).toHaveBeenCalledWith(
         "channel-123",
         undefined,
-        expect.any(Object)
+        expect.any(Object),
+        {}, // config
+        false, // isThread
+        undefined // threadName
       );
       expect(mockClaudeManager.runClaudeCode).toHaveBeenCalledWith(
         "channel-123",
@@ -141,7 +144,10 @@ describe("DiscordBot Thread Support", () => {
       expect(mockClaudeManager.reserveChannel).toHaveBeenCalledWith(
         "thread-456", // Thread ID used for session management
         undefined,
-        expect.any(Object)
+        expect.any(Object),
+        {}, // config
+        true, // isThread
+        "my-discussion" // threadName
       );
       expect(mockClaudeManager.runClaudeCode).toHaveBeenCalledWith(
         "thread-456", // Thread ID

@@ -2,49 +2,127 @@ import { spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import { EmbedBuilder } from "discord.js";
-import type { SDKMessage } from "../types/index.js";
+import type { SDKMessage, SessionState, SessionConfig } from "../types/index.js";
 import { buildClaudeCommand, type DiscordContext } from "../utils/shell.js";
 import { DatabaseManager } from "../db/database.js";
+import { SessionManager } from "./session-manager.js";
+import { SessionState as SessionStateEnum } from "../types/index.js";
 
 export class ClaudeManager {
   private db: DatabaseManager;
+  private sessionManager: SessionManager;
   private channelMessages = new Map<string, any>();
   private channelToolCalls = new Map<string, Map<string, { message: any, toolId: string }>>();
   private channelNames = new Map<string, string>();
-  private channelProcesses = new Map<
-    string,
-    {
-      process: any;
-      sessionId?: string;
-      discordMessage: any;
-    }
-  >();
 
   constructor(private baseFolder: string) {
     this.db = new DatabaseManager();
+    this.sessionManager = new SessionManager(this.db);
+    
     // Clean up old sessions on startup
     this.db.cleanupOldSessions();
+
+    // Set up session manager event handlers
+    this.setupSessionManagerEvents();
+  }
+
+  private setupSessionManagerEvents(): void {
+    this.sessionManager.on('sessionStateChanged', (channelId: string, state: SessionState) => {
+      console.log(`Session ${channelId} state changed to: ${state}`);
+      this.updateDiscordStatus(channelId, state);
+    });
+
+    this.sessionManager.on('sessionCompleted', (channelId: string) => {
+      console.log(`Session ${channelId} completed`);
+    });
+
+    this.sessionManager.on('sessionError', (channelId: string, error: Error) => {
+      console.error(`Session ${channelId} error:`, error);
+    });
+  }
+
+  private updateDiscordStatus(channelId: string, state: SessionState): void {
+    const message = this.channelMessages.get(channelId);
+    if (!message?.edit) return;
+
+    const metadata = this.sessionManager.getSessionMetadata(channelId);
+    if (!metadata) return;
+
+    let statusEmbed = new EmbedBuilder();
+    let color = 0xFFD700; // Default yellow
+
+    switch (state) {
+      case SessionState.STARTING:
+        statusEmbed.setTitle("🚀 Starting Session");
+        color = 0xFFD700; // Yellow
+        break;
+      case SessionState.ACTIVE:
+        statusEmbed.setTitle("⚡ Session Active");
+        color = 0x00FF00; // Green
+        break;
+      case SessionState.PAUSED:
+        statusEmbed.setTitle("⏸️ Session Paused");
+        color = 0xFF8C00; // Orange
+        break;
+      case SessionState.COMPLETED:
+        statusEmbed.setTitle("✅ Session Complete");
+        color = 0x00FF00; // Green
+        break;
+      case SessionState.ERROR:
+        statusEmbed.setTitle("❌ Session Error");
+        color = 0xFF0000; // Red
+        break;
+      case SessionState.ABORTED:
+        statusEmbed.setTitle("🛑 Session Aborted");
+        color = 0xFF0000; // Red
+        break;
+    }
+
+    const locationText = metadata.isThread 
+      ? `📌 Thread: ${metadata.threadName}\n📁 Project: ${metadata.channelName}`
+      : `📁 Channel: ${metadata.channelName}`;
+
+    statusEmbed
+      .setColor(color)
+      .setDescription(`${locationText}\n**Session ID:** ${metadata.sessionId}\n**Messages:** ${metadata.messageCount}`)
+      .setTimestamp();
+
+    message.edit({ embeds: [statusEmbed] }).catch(console.error);
   }
 
   hasActiveProcess(channelId: string): boolean {
-    return this.channelProcesses.has(channelId);
+    return this.sessionManager.hasActiveProcess(channelId);
+  }
+
+  getSessionState(channelId: string): SessionState {
+    return this.sessionManager.getSessionState(channelId);
+  }
+
+  getSessionMetadata(channelId: string) {
+    return this.sessionManager.getSessionMetadata(channelId);
   }
 
   killActiveProcess(channelId: string): void {
-    const activeProcess = this.channelProcesses.get(channelId);
-    if (activeProcess?.process) {
-      console.log(`Killing active process for channel ${channelId}`);
-      activeProcess.process.kill("SIGTERM");
-    }
+    this.sessionManager.abortSession(channelId);
   }
 
   clearSession(channelId: string): void {
-    this.killActiveProcess(channelId);
-    this.db.clearSession(channelId);
+    this.sessionManager.clearSession(channelId);
     this.channelMessages.delete(channelId);
     this.channelToolCalls.delete(channelId);
     this.channelNames.delete(channelId);
-    this.channelProcesses.delete(channelId);
+  }
+
+  pauseSession(channelId: string): boolean {
+    return this.sessionManager.pauseSession(channelId);
+  }
+
+  resumeSession(channelId: string): boolean {
+    return this.sessionManager.resumeSession(channelId);
+  }
+
+  abortSession(channelId: string): boolean {
+    return this.sessionManager.abortSession(channelId);
   }
 
   setDiscordMessage(channelId: string, message: any): void {
@@ -55,26 +133,43 @@ export class ClaudeManager {
   reserveChannel(
     channelId: string,
     sessionId: string | undefined,
-    discordMessage: any
+    discordMessage: any,
+    config: SessionConfig = {},
+    isThread: boolean = false,
+    threadName?: string
   ): void {
-    // Kill any existing process (safety measure)
-    const existingProcess = this.channelProcesses.get(channelId);
-    if (existingProcess?.process) {
-      console.log(
-        `Killing existing process for channel ${channelId} before starting new one`
-      );
-      existingProcess.process.kill("SIGTERM");
+    // Abort any existing session
+    if (this.sessionManager.hasActiveProcess(channelId)) {
+      console.log(`Aborting existing session for channel ${channelId} before starting new one`);
+      this.sessionManager.abortSession(channelId);
     }
 
-    // Reserve the channel by adding a placeholder entry (prevents race conditions)
-    this.channelProcesses.set(channelId, {
-      process: null, // Will be set when process actually starts
-      sessionId,
-      discordMessage,
-    });
+    // Create or update session metadata
+    const channelName = this.channelNames.get(channelId) || 'default';
+    if (sessionId) {
+      // Update existing session
+      this.sessionManager.updateSessionState(channelId, SessionStateEnum.STARTING);
+    } else {
+      // Create new session - sessionId will be set when Claude responds
+      this.sessionManager.createSession(
+        channelId,
+        'pending', // Temporary until Claude provides real sessionId
+        channelName,
+        config,
+        isThread,
+        threadName
+      );
+    }
   }
 
   getSessionId(channelId: string): string | undefined {
+    // First check session manager for active sessions
+    const metadata = this.sessionManager.getSessionMetadata(channelId);
+    if (metadata && metadata.sessionId !== 'pending') {
+      return metadata.sessionId;
+    }
+    
+    // Fall back to database
     return this.db.getSession(channelId);
   }
 
@@ -83,7 +178,8 @@ export class ClaudeManager {
     channelName: string,
     prompt: string,
     sessionId?: string,
-    discordContext?: DiscordContext
+    discordContext?: DiscordContext,
+    config: SessionConfig = {}
   ): Promise<void> {
     // Store the channel name for path replacement
     this.channelNames.set(channelId, channelName);
@@ -92,6 +188,7 @@ export class ClaudeManager {
 
     // Check if working directory exists
     if (!fs.existsSync(workingDir)) {
+      this.sessionManager.errorSession(channelId, new Error(`Working directory does not exist: ${workingDir}`));
       throw new Error(`Working directory does not exist: ${workingDir}`);
     }
 
@@ -108,13 +205,19 @@ export class ClaudeManager {
 
     console.log(`Claude process spawned with PID: ${claude.pid}`);
 
-    // Update the channel process tracking with actual process
-    const channelProcess = this.channelProcesses.get(channelId);
-    if (channelProcess) {
-      channelProcess.process = claude;
-    }
+    // Set the active process in session manager
+    this.sessionManager.setActiveProcess(channelId, {
+      process: claude,
+      sessionId,
+      discordMessage: this.channelMessages.get(channelId),
+      messageQueue: [],
+      inputStream: claude.stdin
+    });
 
-    // Close stdin to signal we're not sending input
+    // Add message to queue
+    this.sessionManager.queueMessage(channelId, prompt);
+
+    // Close stdin for now - we'll reopen it for follow-up messages
     claude.stdin.end();
 
     // Add immediate listeners to debug
@@ -124,6 +227,7 @@ export class ClaudeManager {
 
     claude.on("error", (error) => {
       console.error("Process spawn error:", error);
+      this.sessionManager.errorSession(channelId, error);
     });
 
     let buffer = "";
@@ -132,6 +236,7 @@ export class ClaudeManager {
     const timeout = setTimeout(() => {
       console.log("Claude process timed out, killing it");
       claude.kill("SIGTERM");
+      this.sessionManager.errorSession(channelId, new Error("Session timed out after 5 minutes"));
 
       const channel = this.channelMessages.get(channelId)?.channel;
       if (channel) {
@@ -195,11 +300,14 @@ export class ClaudeManager {
     claude.on("close", (code) => {
       console.log(`Claude process exited with code ${code}`);
       clearTimeout(timeout);
-      // Ensure cleanup on process close
-      this.channelProcesses.delete(channelId);
 
-      if (code !== 0 && code !== null) {
-        // Process failed - send error embed to Discord
+      if (code === 0 || code === null) {
+        // Normal completion
+        this.sessionManager.completeSession(channelId);
+      } else {
+        // Process failed
+        this.sessionManager.errorSession(channelId, new Error(`Process exited with code: ${code}`));
+        
         const channel = this.channelMessages.get(channelId)?.channel;
         if (channel) {
           const errorEmbed = new EmbedBuilder()
@@ -394,7 +502,13 @@ export class ClaudeManager {
   ): Promise<void> {
     console.log("Result message:", parsed);
     const channelName = this.channelNames.get(channelId) || "default";
-    this.db.setSession(channelId, parsed.session_id, channelName);
+    
+    // Update session with actual session ID and persist to database
+    const metadata = this.sessionManager.getSessionMetadata(channelId);
+    if (metadata) {
+      metadata.sessionId = parsed.session_id;
+      this.db.setSession(channelId, parsed.session_id, channelName);
+    }
 
     const channel = this.channelMessages.get(channelId)?.channel;
     if (!channel) return;
@@ -410,11 +524,17 @@ export class ClaudeManager {
         .setTitle("✅ Session Complete")
         .setDescription(description)
         .setColor(0x00FF00); // Green for success
+        
+      // Mark session as completed
+      this.sessionManager.completeSession(channelId);
     } else {
       resultEmbed
         .setTitle("❌ Session Failed")
         .setDescription(`Task failed: ${parsed.subtype}`)
         .setColor(0xFF0000); // Red for failure
+        
+      // Mark session as error
+      this.sessionManager.errorSession(channelId, new Error(`Session failed: ${parsed.subtype}`));
     }
 
     try {
@@ -423,17 +543,15 @@ export class ClaudeManager {
       console.error("Error sending result message:", error);
     }
 
-    console.log("Got result message, cleaning up process tracking");
+    console.log("Got result message, session state updated");
   }
 
 
 
   // Clean up resources
   destroy(): void {
-    // Close all active processes
-    for (const [channelId] of this.channelProcesses) {
-      this.killActiveProcess(channelId);
-    }
+    // Clean up session manager
+    this.sessionManager.destroy();
     
     // Close database connection
     this.db.close();
